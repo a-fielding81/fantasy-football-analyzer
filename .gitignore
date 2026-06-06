@@ -1,0 +1,20 @@
+## Python
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+
+## Data (never commit the database)
+data/
+
+## Node
+frontend/node_modules/
+frontend/dist/
+
+## macOS
+.DS_Store
+
+## IDE
+.vscode/
+.idea/
