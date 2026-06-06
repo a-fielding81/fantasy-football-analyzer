@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+from typing import Optional
 from fastapi import APIRouter, Query
 from db.database import get_connection
 
@@ -7,7 +6,7 @@ router = APIRouter()
 
 
 @router.get("/")
-def list_trades(year: int | None = Query(None)):
+def list_trades(year: Optional[int] = Query(None)):
     conn = get_connection()
     where = "WHERE s.year = ?" if year else ""
     params = (year,) if year else ()
@@ -28,7 +27,7 @@ def list_trades(year: int | None = Query(None)):
 
 
 @router.get("/detail")
-def trade_detail(year: int | None = Query(None)):
+def trade_detail(year: Optional[int] = Query(None)):
     """Full asset-level detail for all trades, optionally filtered by year."""
     conn = get_connection()
     where = "WHERE year = ?" if year else ""

@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+from typing import Optional
 from fastapi import APIRouter, Query
 from db.database import get_connection
 
@@ -7,7 +6,7 @@ router = APIRouter()
 
 
 @router.get("/")
-def draft_summary(year: int | None = Query(None)):
+def draft_summary(year: Optional[int] = Query(None)):
     conn = get_connection()
     where = "WHERE year = ?" if year else ""
     params = (year,) if year else ()
@@ -21,7 +20,7 @@ def draft_summary(year: int | None = Query(None)):
 
 
 @router.get("/value-over-adp")
-def value_over_adp(year: int | None = Query(None)):
+def value_over_adp(year: Optional[int] = Query(None)):
     """
     For picks where we have ADP, compute fantasy_points vs. positional expectation.
     This is a foundational query for draft grading.
@@ -68,7 +67,7 @@ def value_over_adp(year: int | None = Query(None)):
 
 
 @router.get("/keepers")
-def keeper_history(year: int | None = Query(None)):
+def keeper_history(year: Optional[int] = Query(None)):
     """All keeper designations across seasons."""
     conn = get_connection()
     where = "AND year = ?" if year else ""
