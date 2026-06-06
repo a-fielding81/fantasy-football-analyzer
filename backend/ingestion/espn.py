@@ -12,7 +12,7 @@ from espn_api.football import League
 from db.database import get_connection, upsert
 
 ESPN_LEAGUE_ID = 92157291
-ESPN_YEARS = [2021, 2022]   # Adjust if the league ran more seasons on ESPN
+ESPN_YEARS = [2020, 2021, 2022]   # League started 2020; moved to Sleeper for 2022+
 
 POSITION_MAP = {
     "QB": "QB", "RB": "RB", "WR": "WR", "TE": "TE",
