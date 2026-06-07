@@ -42,11 +42,14 @@ def ingest_espn_season(conn, league: League, year: int, db_league_id: int):
 
     # Teams & managers
     for team in league.teams:
-        owner_name = " ".join(filter(None, [
-            getattr(team, "owner", None),
-            getattr(team, "co_owners", [None])[0] if getattr(team, "co_owners", None) else None,
-        ])).strip() or f"Owner-{team.team_id}"
-        # ESPN doesn't expose a stable user id — use owner name as key
+        # Prefer owners[0] firstName+lastName; fall back to team_id label
+        owners_list = getattr(team, "owners", None) or []
+        if owners_list:
+            first = owners_list[0]
+            owner_name = f"{first.get('firstName', '')} {first.get('lastName', '')}".strip()
+        if not owners_list or not owner_name:
+            owner_name = f"Owner-{team.team_id}"
+
         manager_id = upsert(conn, "managers", {
             "display_name":  owner_name,
             "espn_owner_id": str(ESPN_LEAGUE_ID) + "_" + str(team.team_id),
