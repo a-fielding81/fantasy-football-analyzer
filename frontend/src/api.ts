@@ -20,6 +20,10 @@ export const api = {
       client
         .get("/trades/detail", { params: year ? { year } : {} })
         .then((r) => r.data),
+    grades: (year?: number) =>
+      client
+        .get("/trades/grades", { params: year ? { year } : {} })
+        .then((r) => r.data),
     byManager: (name: string) =>
       client.get(`/trades/managers/${encodeURIComponent(name)}`).then((r) => r.data),
   },
