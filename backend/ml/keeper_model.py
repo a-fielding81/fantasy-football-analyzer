@@ -98,12 +98,12 @@ def build_keeper_dataset(conn) -> pd.DataFrame:
             psa.target_share        AS prior_target_share,
             psa.carries             AS prior_carries,
             psa.wopr                AS prior_wopr,
-            -- Times already kept before this decision
+            -- Times kept league-wide before this decision (any manager, any team).
+            -- Using league-wide count rather than per-manager so a player who has
+            -- been a desirable keeper for OTHER managers signals value when traded.
             (SELECT COUNT(*) FROM draft_picks dk2
              JOIN seasons sk2 ON dk2.season_id = sk2.id
-             JOIN teams tk2   ON dk2.team_id   = tk2.id
              WHERE dk2.player_id  = kd.player_id
-               AND tk2.manager_id = kd.manager_id
                AND dk2.is_keeper  = 1
                AND sk2.year       < kd.year) AS times_kept_before
         FROM keeper_decisions kd

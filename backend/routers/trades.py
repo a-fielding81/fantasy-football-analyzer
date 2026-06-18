@@ -81,18 +81,18 @@ def _resolve_pick_player(recv_mgr: str, pick_year: int, pick_round: int,
 # Times-kept lookup
 # ---------------------------------------------------------------------------
 
-def _times_kept_before(player_id: int, manager_id: int, before_year: int,
-                        conn) -> int:
+def _times_kept_before(player_id: int, before_year: int, conn) -> int:
+    """Count how many times this player has been kept league-wide before before_year.
+    League-wide (not per-manager) so that a player kept by a prior manager still
+    signals keeper value when they are traded to a new team."""
     row = conn.execute("""
         SELECT COUNT(*) AS n
         FROM draft_picks dp
-        JOIN teams t  ON t.id  = dp.team_id
         JOIN seasons s ON s.id = dp.season_id
-        WHERE dp.player_id    = ?
-          AND t.manager_id    = ?
-          AND dp.is_keeper    = 1
-          AND s.year          < ?
-    """, (player_id, manager_id, before_year)).fetchone()
+        WHERE dp.player_id  = ?
+          AND dp.is_keeper  = 1
+          AND s.year        < ?
+    """, (player_id, before_year)).fetchone()
     return row["n"] if row else 0
 
 
@@ -252,11 +252,13 @@ def trade_grades(year: Optional[int] = Query(None)):
 
             # Process (ML)
             if ml_available:
-                tkb = _times_kept_before(pid, recv_mgr_id, trade_year, conn)
-                # The receiving manager just chose to acquire this player — that
-                # is itself a signal of intent to keep. Treat newly acquired
-                # players as if kept at least once to avoid penalising managers
-                # for not having a prior history with a player they just traded for.
+                # League-wide keeper count: how many times has ANY manager kept
+                # this player before this trade year. This correctly captures
+                # keeper history even when the player switches teams.
+                tkb = _times_kept_before(pid, trade_year, conn)
+                # Still floor at 1: the act of trading FOR a player is itself a
+                # keep signal, so a player who has never been kept anywhere still
+                # gets a small bump vs. a pure rookie / unknown.
                 tkb_adj = max(tkb, 1)
                 val = valuator.value_player(pid, trade_year, conn,
                                             times_kept_before=tkb_adj)
