@@ -130,9 +130,11 @@ def build_keeper_dataset(conn) -> pd.DataFrame:
 
 FEATURE_COLS = [
     "pos_enc", "age",
-    "ppr_per_game",           # rate-based production (filters out injury volume loss)
-    "prior_games",            # volume / availability signal
-    "prior_target_share", "prior_carries", "prior_wopr",
+    "ppr_per_game",           # rate-based production  (de-noises injury-shortened seasons)
+    "carries_per_game",       # rate-based rush volume (bell-cow signal, injury-normalized)
+    "prior_target_share",     # already a rate (fraction of team targets) — no normalization needed
+    "prior_wopr",             # already a rate
+    "prior_games",            # raw games: availability/durability signal
     "times_kept_before",
     "weeks_out",              # injury severity: 0 = healthy, 7+ = likely on IR
     "injury_bucket",          # 0=none 1=soft-tissue 2=upper 3=lower-joint 4=head/neck
@@ -148,8 +150,10 @@ def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     df["prior_games"]        = df["prior_games"].fillna(0).clip(lower=1)
     df["weeks_out"]          = df["weeks_out"].fillna(0)
     df["injury_bucket"]      = df["injury_bucket"].fillna(0)
-    # Rate-based production: PPR per game played (de-noises injury-shortened seasons)
-    df["ppr_per_game"]       = df["prior_ppr"] / df["prior_games"]
+    # Rate-based features: normalize by games played so injury-shortened seasons
+    # are evaluated on efficiency, not volume.
+    df["ppr_per_game"]       = df["prior_ppr"]     / df["prior_games"]
+    df["carries_per_game"]   = df["prior_carries"] / df["prior_games"]
     return df
 
 
