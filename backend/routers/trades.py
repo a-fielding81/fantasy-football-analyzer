@@ -195,6 +195,16 @@ def trade_grades(year: Optional[int] = Query(None)):
     pts_map, data_years = _build_player_season_pts(conn)
     pick_cache = {}
 
+    # Pre-build sent-players index: for each (trade_id, manager_id), the set of
+    # player_ids that manager is SENDING. Used to exclude sent same-position players
+    # from the roster-rank calculation so Irving (received by Danny) isn't ranked
+    # behind Achane (sent by Danny in the same trade).
+    sent_players: dict = {}   # (tid, mgr_id) → set[player_id]
+    for row in assets_raw:
+        if row["asset_type"] == "player" and row["player_id"]:
+            key = (row["trade_id"], row["sender_mgr_id"])
+            sent_players.setdefault(key, set()).add(row["player_id"])
+
     # ── Aggregate by trade → manager ─────────────────────────────────────────
     # Structure: trade_id → manager_name → {process_value, outcome_value, assets[]}
     trade_map  = {}
@@ -260,9 +270,14 @@ def trade_grades(year: Optional[int] = Query(None)):
                 # keep signal, so a player who has never been kept anywhere still
                 # gets a small bump vs. a pure rookie / unknown.
                 tkb_adj = max(tkb, 1)
+                # Players the receiver is sending away in this same trade —
+                # exclude them from the roster-rank calculation so we get the
+                # post-trade rank rather than the pre-trade rank.
+                exclude_pids = sent_players.get((tid, recv_mgr_id), set())
                 val = valuator.value_player(pid, trade_year, conn,
                                             times_kept_before=tkb_adj,
-                                            recv_mgr_id=recv_mgr_id)
+                                            recv_mgr_id=recv_mgr_id,
+                                            exclude_roster_pids=exclude_pids)
                 asset_info.update({
                     "process_value":  val["process_value"],
                     "predicted_2yr":  val["predicted_2yr"],

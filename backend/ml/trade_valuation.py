@@ -130,6 +130,7 @@ class TradeValuator:
         conn,
         times_kept_before: int = 0,
         recv_mgr_id: Optional[int] = None,
+        exclude_roster_pids: Optional[set] = None,
     ) -> dict:
         """
         Compute forward-looking value for a player at trade time.
@@ -221,13 +222,16 @@ class TradeValuator:
                 ORDER BY ppg DESC
             """, (roster_year, recv_mgr_id, pos, roster_year)).fetchall()
 
-            pos_depth = max(len(roster_rows), 1)
+            # Exclude players being sent out in the same trade so rank reflects
+            # the post-trade roster (e.g. Achane sent away → Irving ranks #2 not #3)
+            exclude = exclude_roster_pids or set()
+            comparable = [r for r in roster_rows
+                          if r["id"] != player_id and r["id"] not in exclude]
+
+            pos_depth = max(len(comparable) + 1, 1)  # +1 for the player themselves
             this_ppg  = ppr_per_game
-            # Rank = 1 + number of roster-mates with strictly higher ppr/game
-            pos_rank_on_roster = 1 + sum(
-                1 for r in roster_rows
-                if r["id"] != player_id and r["ppg"] > this_ppg
-            )
+            # Rank = 1 + number of post-trade roster-mates with strictly higher ppr/game
+            pos_rank_on_roster = 1 + sum(1 for r in comparable if r["ppg"] > this_ppg)
 
         pos_rank_clipped = min(pos_rank_on_roster, 3)
 
