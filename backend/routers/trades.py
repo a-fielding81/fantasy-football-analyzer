@@ -261,7 +261,8 @@ def trade_grades(year: Optional[int] = Query(None)):
                 # gets a small bump vs. a pure rookie / unknown.
                 tkb_adj = max(tkb, 1)
                 val = valuator.value_player(pid, trade_year, conn,
-                                            times_kept_before=tkb_adj)
+                                            times_kept_before=tkb_adj,
+                                            recv_mgr_id=recv_mgr_id)
                 asset_info.update({
                     "process_value":  val["process_value"],
                     "predicted_2yr":  val["predicted_2yr"],

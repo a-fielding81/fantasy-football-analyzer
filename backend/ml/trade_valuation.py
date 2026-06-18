@@ -129,6 +129,7 @@ class TradeValuator:
         trade_year: int,
         conn,
         times_kept_before: int = 0,
+        recv_mgr_id: Optional[int] = None,
     ) -> dict:
         """
         Compute forward-looking value for a player at trade time.
@@ -197,6 +198,39 @@ class TradeValuator:
         carries_per_game = feats.get("carries_t", 0) / prior_games
         targets_per_game = feats.get("targets_t", 0) / prior_games
 
+        # Roster depth context: where does this player rank at their position
+        # on the receiving manager's team? Use the most recent end-of-season
+        # roster snapshot (trade_year - 1 final week=0).
+        pos_rank_on_roster = 1
+        pos_depth          = 1
+        pos = meta.get("position") or ""
+        if recv_mgr_id and pos:
+            roster_year = trade_year - 1
+            # Rank by ppr_per_game so injury-shortened seasons don't mis-rank
+            roster_rows = conn.execute("""
+                SELECT p2.id,
+                       COALESCE(nps2.fantasy_points_ppr, 0)
+                           / MAX(COALESCE(nps2.games, 1), 1) AS ppg
+                FROM roster_players rp2
+                JOIN seasons  s2  ON s2.id  = rp2.season_id AND s2.year = ?
+                JOIN teams    t2  ON t2.id  = rp2.team_id   AND t2.manager_id = ?
+                JOIN players  p2  ON p2.id  = rp2.player_id AND p2.position = ?
+                LEFT JOIN nfl_player_seasons nps2
+                    ON nps2.gsis_id = p2.gsis_id AND nps2.season_year = ?
+                WHERE rp2.week = 0
+                ORDER BY ppg DESC
+            """, (roster_year, recv_mgr_id, pos, roster_year)).fetchall()
+
+            pos_depth = max(len(roster_rows), 1)
+            this_ppg  = ppr_per_game
+            # Rank = 1 + number of roster-mates with strictly higher ppr/game
+            pos_rank_on_roster = 1 + sum(
+                1 for r in roster_rows
+                if r["id"] != player_id and r["ppg"] > this_ppg
+            )
+
+        pos_rank_clipped = min(pos_rank_on_roster, 3)
+
         keeper_feats = {
             "pos_enc":            feats.get("pos_enc", 2),
             "age":                feats.get("age", 26),
@@ -207,6 +241,7 @@ class TradeValuator:
             "times_kept_before":  times_kept_before,
             "weeks_out":          weeks_out,
             "injury_bucket":      injury_bucket,
+            "pos_rank_clipped":   pos_rank_clipped,
         }
         X_keep = np.array([[keeper_feats.get(f, 0.0) for f in self._keeper_feats]])
         keeper_prob = float(self._keeper_pipe.predict_proba(X_keep)[0, 1])
@@ -221,6 +256,8 @@ class TradeValuator:
             "targets_per_game":    round(targets_per_game, 2),
             "weeks_out":           weeks_out,
             "injury_bucket":       injury_bucket,
+            "pos_rank_on_roster":  pos_rank_on_roster,   # raw rank for display
+            "pos_rank_clipped":    pos_rank_clipped,      # clipped (1/2/3+) fed to model
             "age":                 feats.get("age"),
             "position":            meta.get("position"),
             "team":                meta.get("team"),

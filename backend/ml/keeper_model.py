@@ -113,7 +113,35 @@ def build_keeper_dataset(conn) -> pd.DataFrame:
                AND sk2.year       < kd.year) AS times_kept_before,
             -- Injury context for this season
             COALESCE(psi.weeks_out,     0) AS weeks_out,
-            COALESCE(psi.injury_bucket, 0) AS injury_bucket
+            COALESCE(psi.injury_bucket, 0) AS injury_bucket,
+            -- Roster depth context: where does this player rank at their position
+            -- on this manager's team? Ranked by ppr/game so injured players are
+            -- evaluated on efficiency not volume.
+            -- pos_rank=1 → best at position (very likely to be kept)
+            -- pos_rank=3+ → third option, much more replaceable
+            (1 + (
+                SELECT COUNT(*) FROM roster_players rp2
+                JOIN players p2      ON p2.id  = rp2.player_id
+                JOIN seasons  s2     ON s2.id  = rp2.season_id AND s2.year = kd.year
+                JOIN teams    t2     ON t2.id  = rp2.team_id   AND t2.manager_id = kd.manager_id
+                LEFT JOIN player_season_advanced psa2
+                    ON psa2.player_id = p2.id AND psa2.season_year = kd.year
+                WHERE rp2.week = 0
+                  AND p2.position = kd.position
+                  AND p2.id      != kd.player_id
+                  AND COALESCE(psa2.fantasy_points_ppr, 0)
+                        / MAX(COALESCE(psa2.games, 1), 1)
+                      > COALESCE(psa.fantasy_points_ppr, 0)
+                        / MAX(COALESCE(psa.games, 1), 1)
+            )) AS pos_rank_on_roster,
+            -- Total same-position players on the roster
+            (SELECT COUNT(*) FROM roster_players rp3
+             JOIN players p3  ON p3.id  = rp3.player_id
+             JOIN seasons  s3 ON s3.id  = rp3.season_id AND s3.year = kd.year
+             JOIN teams    t3 ON t3.id  = rp3.team_id   AND t3.manager_id = kd.manager_id
+             WHERE rp3.week = 0
+               AND p3.position = kd.position
+            ) AS pos_depth
         FROM keeper_decisions kd
         LEFT JOIN player_season_advanced psa
             ON psa.player_id  = kd.player_id
@@ -129,15 +157,16 @@ def build_keeper_dataset(conn) -> pd.DataFrame:
 
 FEATURE_COLS = [
     "pos_enc", "age",
-    "ppr_per_game",         # rate-based production  (de-noises injury-shortened seasons)
-    "carries_per_game",     # rate-based rush volume (bell-cow signal, injury-normalized)
-    "targets_per_game",     # rate-based receiving usage (injury-normalized; season target_share
-                            # deflates when a player misses weeks since those weeks' team targets
-                            # still land in the denominator; tgt/game fixes that)
-    "prior_games",          # raw games: availability/durability signal
+    "ppr_per_game",           # rate-based production  (de-noises injury-shortened seasons)
+    "carries_per_game",       # rate-based rush volume (bell-cow signal, injury-normalized)
+    "targets_per_game",       # rate-based receiving usage (injury-normalized)
+    "prior_games",            # raw games: availability/durability signal
     "times_kept_before",
-    "weeks_out",            # injury severity: 0 = healthy, 7+ = likely on IR
-    "injury_bucket",        # 0=none 1=soft-tissue 2=upper 3=lower-joint 4=head/neck
+    "weeks_out",              # injury severity: 0 = healthy, 7+ = likely on IR
+    "injury_bucket",          # 0=none 1=soft-tissue 2=upper 3=lower-joint 4=head/neck
+    "pos_rank_clipped",       # roster rank at position, clipped to 1/2/3+ (collinear with
+                              # ppr_per_game if used raw; clipping isolates the independent
+                              # signal: starter vs. backup vs. depth piece)
 ]
 
 
@@ -153,6 +182,11 @@ def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     df["ppr_per_game"]       = df["prior_ppr"]     / df["prior_games"]
     df["carries_per_game"]   = df["prior_carries"] / df["prior_games"]
     df["targets_per_game"]   = df["prior_targets"] / df["prior_games"]
+    df["pos_rank_on_roster"] = df["pos_rank_on_roster"].fillna(1).clip(lower=1)
+    # Clip to 3: rank 1 (starter), rank 2 (handcuff/flex), rank 3+ (depth/stash).
+    # Beyond 3 there's almost zero keeper probability regardless, and unclipped ranks
+    # 8-14 add noise that hurts the logistic regression.
+    df["pos_rank_clipped"]   = df["pos_rank_on_roster"].clip(upper=3)
     return df
 
 
