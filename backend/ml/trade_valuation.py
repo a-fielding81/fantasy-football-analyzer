@@ -176,15 +176,35 @@ class TradeValuator:
         pred_2yr = float(self._prod_rf.predict(X_prod)[0])
         pred_2yr = max(0.0, pred_2yr)
 
+        # Look up injury context for the data year (same year the stats come from)
+        data_year = meta.get("data_year") or (trade_year - 1)
+        gsis_id   = meta.get("gsis_id")
+        weeks_out     = 0
+        injury_bucket = 0
+        if gsis_id:
+            inj_row = conn.execute("""
+                SELECT weeks_out, injury_bucket
+                FROM player_season_injuries
+                WHERE gsis_id = ? AND season_year = ?
+            """, (gsis_id, data_year)).fetchone()
+            if inj_row:
+                weeks_out     = inj_row["weeks_out"]     or 0
+                injury_bucket = inj_row["injury_bucket"] or 0
+
+        prior_games  = max(feats.get("games_t", 1), 1)
+        ppr_per_game = feats.get("pts_t", 0) / prior_games
+
         keeper_feats = {
             "pos_enc":            feats.get("pos_enc", 2),
             "age":                feats.get("age", 26),
-            "prior_ppr":          feats.get("pts_t", 0),
-            "prior_games":        feats.get("games_t", 0),
+            "ppr_per_game":       ppr_per_game,
+            "prior_games":        prior_games,
             "prior_target_share": feats.get("target_share_t", 0),
             "prior_carries":      feats.get("carries_t", 0),
             "prior_wopr":         feats.get("wopr_t", 0),
             "times_kept_before":  times_kept_before,
+            "weeks_out":          weeks_out,
+            "injury_bucket":      injury_bucket,
         }
         X_keep = np.array([[keeper_feats.get(f, 0.0) for f in self._keeper_feats]])
         keeper_prob = float(self._keeper_pipe.predict_proba(X_keep)[0, 1])
@@ -194,6 +214,9 @@ class TradeValuator:
 
         key_factors = {
             "prior_ppr":           round(feats.get("pts_t", 0), 1),
+            "ppr_per_game":        round(ppr_per_game, 1),
+            "weeks_out":           weeks_out,
+            "injury_bucket":       injury_bucket,
             "age":                 feats.get("age"),
             "position":            meta.get("position"),
             "team":                meta.get("team"),
@@ -442,6 +465,7 @@ class TradeValuator:
             "position":     pos,
             "team":         team,
             "data_year":    data_year,
+            "gsis_id":      gsis,
             "coaching_tree":coaching_tree,
             "is_rookie":    False,
         }

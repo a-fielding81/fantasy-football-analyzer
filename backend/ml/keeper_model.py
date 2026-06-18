@@ -44,6 +44,12 @@ def build_keeper_dataset(conn) -> pd.DataFrame:
     For each player on a roster at end of season Y, create a row with:
     - features describing the player at end of season Y
     - label: 1 if they were kept in season Y+1, 0 otherwise
+
+    Injury features (from player_season_injuries):
+      weeks_out     — weeks listed as report_status='Out' during the season
+      injury_bucket — 0=none  1=soft-tissue  2=upper  3=lower-joint  4=head/neck
+    Combined with ppr_per_game these let the model distinguish "injured but
+    still productive per game" from "healthy but just bad."
     """
     df = pd.read_sql_query("""
         WITH roster_end AS (
@@ -56,6 +62,7 @@ def build_keeper_dataset(conn) -> pd.DataFrame:
                 p.full_name,
                 p.position,
                 p.birth_date,
+                p.gsis_id,
                 CAST(s.year - SUBSTR(p.birth_date,1,4) AS INTEGER) AS age
             FROM roster_players rp
             JOIN seasons s   ON s.id  = rp.season_id
@@ -76,6 +83,7 @@ def build_keeper_dataset(conn) -> pd.DataFrame:
                 re.full_name,
                 re.position,
                 re.age,
+                re.gsis_id,
                 -- Was this player kept the following year BY THE SAME MANAGER?
                 CASE WHEN dp_next.id IS NOT NULL THEN 1 ELSE 0 END AS was_kept
             FROM roster_end re
@@ -92,24 +100,28 @@ def build_keeper_dataset(conn) -> pd.DataFrame:
         )
         SELECT
             kd.*,
-            -- Prior season PPR
+            -- Prior season raw stats
             psa.fantasy_points_ppr  AS prior_ppr,
             psa.games               AS prior_games,
             psa.target_share        AS prior_target_share,
             psa.carries             AS prior_carries,
             psa.wopr                AS prior_wopr,
             -- Times kept league-wide before this decision (any manager, any team).
-            -- Using league-wide count rather than per-manager so a player who has
-            -- been a desirable keeper for OTHER managers signals value when traded.
             (SELECT COUNT(*) FROM draft_picks dk2
              JOIN seasons sk2 ON dk2.season_id = sk2.id
              WHERE dk2.player_id  = kd.player_id
                AND dk2.is_keeper  = 1
-               AND sk2.year       < kd.year) AS times_kept_before
+               AND sk2.year       < kd.year) AS times_kept_before,
+            -- Injury context for this season
+            COALESCE(psi.weeks_out,     0) AS weeks_out,
+            COALESCE(psi.injury_bucket, 0) AS injury_bucket
         FROM keeper_decisions kd
         LEFT JOIN player_season_advanced psa
             ON psa.player_id  = kd.player_id
            AND psa.season_year = kd.year
+        LEFT JOIN player_season_injuries psi
+            ON psi.gsis_id     = kd.gsis_id
+           AND psi.season_year  = kd.year
         WHERE psa.fantasy_points_ppr IS NOT NULL   -- need production data
     """, conn)
 
@@ -118,9 +130,12 @@ def build_keeper_dataset(conn) -> pd.DataFrame:
 
 FEATURE_COLS = [
     "pos_enc", "age",
-    "prior_ppr", "prior_games",
+    "ppr_per_game",           # rate-based production (filters out injury volume loss)
+    "prior_games",            # volume / availability signal
     "prior_target_share", "prior_carries", "prior_wopr",
     "times_kept_before",
+    "weeks_out",              # injury severity: 0 = healthy, 7+ = likely on IR
+    "injury_bucket",          # 0=none 1=soft-tissue 2=upper 3=lower-joint 4=head/neck
 ]
 
 
@@ -130,7 +145,11 @@ def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     df["prior_target_share"] = df["prior_target_share"].fillna(0)
     df["prior_carries"]      = df["prior_carries"].fillna(0)
     df["prior_wopr"]         = df["prior_wopr"].fillna(0)
-    df["prior_games"]        = df["prior_games"].fillna(0)
+    df["prior_games"]        = df["prior_games"].fillna(0).clip(lower=1)
+    df["weeks_out"]          = df["weeks_out"].fillna(0)
+    df["injury_bucket"]      = df["injury_bucket"].fillna(0)
+    # Rate-based production: PPR per game played (de-noises injury-shortened seasons)
+    df["ppr_per_game"]       = df["prior_ppr"] / df["prior_games"]
     return df
 
 
@@ -248,15 +267,34 @@ def print_report(df: pd.DataFrame, cv_results: dict):
                .round(3))
     print(summary.to_string())
 
-    # PPR threshold analysis
-    print("\n  Keep rate by prior PPR tier:")
-    df["ppr_tier"] = pd.cut(df["prior_ppr"],
-                            bins=[0, 100, 175, 250, 400, 9999],
-                            labels=["<100", "100-175", "175-250", "250-400", "400+"])
-    summary2 = (df.groupby("ppr_tier")["was_kept"]
+    # PPR/game threshold analysis
+    print("\n  Keep rate by prior PPR/game tier:")
+    df["ppr_pg_tier"] = pd.cut(df["ppr_per_game"],
+                               bins=[0, 7, 12, 17, 25, 9999],
+                               labels=["<7", "7-12", "12-17", "17-25", "25+"])
+    summary2 = (df.groupby("ppr_pg_tier")["was_kept"]
                 .agg(["mean", "count"])
                 .round(3))
     print(summary2.to_string())
+
+    # Injury bucket breakdown
+    print("\n  Keep rate by injury bucket:")
+    bucket_labels = {0: "0-none", 1: "1-soft-tissue", 2: "2-upper", 3: "3-lower-joint", 4: "4-head/neck"}
+    df["bucket_label"] = df["injury_bucket"].map(bucket_labels)
+    summary3 = (df.groupby("bucket_label")["was_kept"]
+                .agg(["mean", "count"])
+                .round(3))
+    print(summary3.to_string())
+
+    # Weeks out breakdown
+    print("\n  Keep rate by weeks out:")
+    df["weeks_out_tier"] = pd.cut(df["weeks_out"],
+                                  bins=[-1, 0, 2, 5, 8, 99],
+                                  labels=["0 (healthy)", "1-2", "3-5", "6-8", "9+"])
+    summary4 = (df.groupby("weeks_out_tier")["was_kept"]
+                .agg(["mean", "count"])
+                .round(3))
+    print(summary4.to_string())
 
 
 def load_model() -> dict:
