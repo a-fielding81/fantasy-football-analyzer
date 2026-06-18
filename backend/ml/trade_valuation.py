@@ -195,14 +195,14 @@ class TradeValuator:
         ppr_per_game = feats.get("pts_t", 0) / prior_games
 
         carries_per_game = feats.get("carries_t", 0) / prior_games
+        targets_per_game = feats.get("targets_t", 0) / prior_games
 
         keeper_feats = {
             "pos_enc":            feats.get("pos_enc", 2),
             "age":                feats.get("age", 26),
             "ppr_per_game":       ppr_per_game,
             "carries_per_game":   carries_per_game,
-            "prior_target_share": feats.get("target_share_t", 0),
-            "prior_wopr":         feats.get("wopr_t", 0),
+            "targets_per_game":   targets_per_game,
             "prior_games":        prior_games,
             "times_kept_before":  times_kept_before,
             "weeks_out":          weeks_out,
@@ -218,12 +218,12 @@ class TradeValuator:
             "prior_ppr":           round(feats.get("pts_t", 0), 1),
             "ppr_per_game":        round(ppr_per_game, 1),
             "carries_per_game":    round(carries_per_game, 1),
+            "targets_per_game":    round(targets_per_game, 2),
             "weeks_out":           weeks_out,
             "injury_bucket":       injury_bucket,
             "age":                 feats.get("age"),
             "position":            meta.get("position"),
             "team":                meta.get("team"),
-            "target_share":        round(feats.get("target_share_t", 0), 3),
             "carries":             feats.get("carries_t"),
             "wopr":                round(feats.get("wopr_t", 0), 3),
             "team_pass_rate":      round(feats.get("team_pass_rate_t", 0), 3),

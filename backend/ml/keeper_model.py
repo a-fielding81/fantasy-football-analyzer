@@ -103,9 +103,8 @@ def build_keeper_dataset(conn) -> pd.DataFrame:
             -- Prior season raw stats
             psa.fantasy_points_ppr  AS prior_ppr,
             psa.games               AS prior_games,
-            psa.target_share        AS prior_target_share,
             psa.carries             AS prior_carries,
-            psa.wopr                AS prior_wopr,
+            psa.targets             AS prior_targets,
             -- Times kept league-wide before this decision (any manager, any team).
             (SELECT COUNT(*) FROM draft_picks dk2
              JOIN seasons sk2 ON dk2.season_id = sk2.id
@@ -130,30 +129,30 @@ def build_keeper_dataset(conn) -> pd.DataFrame:
 
 FEATURE_COLS = [
     "pos_enc", "age",
-    "ppr_per_game",           # rate-based production  (de-noises injury-shortened seasons)
-    "carries_per_game",       # rate-based rush volume (bell-cow signal, injury-normalized)
-    "prior_target_share",     # already a rate (fraction of team targets) — no normalization needed
-    "prior_wopr",             # already a rate
-    "prior_games",            # raw games: availability/durability signal
+    "ppr_per_game",         # rate-based production  (de-noises injury-shortened seasons)
+    "carries_per_game",     # rate-based rush volume (bell-cow signal, injury-normalized)
+    "targets_per_game",     # rate-based receiving usage (injury-normalized; season target_share
+                            # deflates when a player misses weeks since those weeks' team targets
+                            # still land in the denominator; tgt/game fixes that)
+    "prior_games",          # raw games: availability/durability signal
     "times_kept_before",
-    "weeks_out",              # injury severity: 0 = healthy, 7+ = likely on IR
-    "injury_bucket",          # 0=none 1=soft-tissue 2=upper 3=lower-joint 4=head/neck
+    "weeks_out",            # injury severity: 0 = healthy, 7+ = likely on IR
+    "injury_bucket",        # 0=none 1=soft-tissue 2=upper 3=lower-joint 4=head/neck
 ]
 
 
 def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["pos_enc"] = df["position"].map(POS_MAP).fillna(2).astype(int)
-    df["prior_target_share"] = df["prior_target_share"].fillna(0)
     df["prior_carries"]      = df["prior_carries"].fillna(0)
-    df["prior_wopr"]         = df["prior_wopr"].fillna(0)
     df["prior_games"]        = df["prior_games"].fillna(0).clip(lower=1)
     df["weeks_out"]          = df["weeks_out"].fillna(0)
     df["injury_bucket"]      = df["injury_bucket"].fillna(0)
-    # Rate-based features: normalize by games played so injury-shortened seasons
-    # are evaluated on efficiency, not volume.
+    # All usage features normalized by games played — injury-shortened seasons
+    # are evaluated on per-game rate, not deflated seasonal volume/share.
     df["ppr_per_game"]       = df["prior_ppr"]     / df["prior_games"]
     df["carries_per_game"]   = df["prior_carries"] / df["prior_games"]
+    df["targets_per_game"]   = df["prior_targets"] / df["prior_games"]
     return df
 
 
