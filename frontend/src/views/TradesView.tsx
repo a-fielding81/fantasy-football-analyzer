@@ -380,6 +380,18 @@ export default function TradesView() {
 // Trade card
 // ---------------------------------------------------------------------------
 
+function weekLabel(trade: Trade): string {
+  if (!trade.week) return "";
+  // Sleeper assigns offseason transactions to week 1 of the upcoming season year.
+  // Detect this: if the transaction date is before Sep 1 of trade.year, it's offseason.
+  if (trade.week === 1 && trade.transaction_date) {
+    const ts = Number(trade.transaction_date);
+    const sep1 = new Date(trade.year, 8, 1).getTime(); // month is 0-indexed: 8 = September
+    if (ts < sep1) return "Offseason";
+  }
+  return `Week ${trade.week}`;
+}
+
 function TradeCard({ trade, gradeMode }: { trade: Trade; gradeMode: "process" | "outcome" }) {
   const [expanded, setExpanded] = useState(false);
   const dateStr = trade.transaction_date
@@ -391,6 +403,8 @@ function TradeCard({ trade, gradeMode }: { trade: Trade; gradeMode: "process" | 
   const isPartialOutcome = gradeMode === "outcome" && trade.outcome_partial && !trade.outcome_graded;
   const totalVal = gradeMode === "process" ? trade.total_process : trade.total_outcome;
 
+  const wkLabel = weekLabel(trade);
+
   // Detect interesting divergences (process grade differs from outcome grade)
   const hasDivergence = trade.ml_graded && trade.outcome_graded &&
     trade.sides.some((s) => s.process_label !== s.outcome_label && s.process_label !== "Pending" && s.outcome_label !== "Pending");
@@ -400,7 +414,7 @@ function TradeCard({ trade, gradeMode }: { trade: Trade; gradeMode: "process" | 
       <div className="trade-card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <span style={{ fontWeight: 600 }}>{trade.year}</span>
-          {trade.week && <span style={{ color: "var(--muted)", fontSize: 13 }}>Week {trade.week}</span>}
+          {wkLabel && <span style={{ color: "var(--muted)", fontSize: 13 }}>{wkLabel}</span>}
           {dateStr && <span style={{ color: "var(--muted)", fontSize: 12 }}>{dateStr}</span>}
           {hasDivergence && (
             <span style={{
