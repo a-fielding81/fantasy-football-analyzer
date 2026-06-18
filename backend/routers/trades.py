@@ -43,9 +43,15 @@ def _build_player_season_pts(conn) -> dict:
     return pts
 
 
-def _player_outcome(player_id: int, from_year: int, pts_map: dict) -> float:
+def _player_outcome(player_id: int, from_year: int, pts_map: dict,
+                    to_year: Optional[int] = None) -> float:
+    """Sum fantasy points from from_year through to_year (inclusive).
+    Phase 2: default to a 2-season window (from_year + 1) so process and
+    outcome are on the same time horizon."""
+    if to_year is None:
+        to_year = from_year + 1
     return sum(v for (pid, yr), v in pts_map.items()
-               if pid == player_id and yr >= from_year)
+               if pid == player_id and from_year <= yr <= to_year)
 
 
 def _resolve_pick_player(recv_mgr: str, pick_year: int, pick_round: int,
@@ -228,6 +234,8 @@ def trade_grades(year: Optional[int] = Query(None)):
             "key_factors":     {},
             "data_year":       None,
             "missing_data":    True,
+            "is_rookie_proj":  False,
+            "low_confidence":  False,
         }
 
         if row["asset_type"] == "player" and row["player_id"]:
@@ -244,12 +252,14 @@ def trade_grades(year: Optional[int] = Query(None)):
                 val = valuator.value_player(pid, trade_year, conn,
                                             times_kept_before=tkb)
                 asset_info.update({
-                    "process_value": val["process_value"],
-                    "predicted_2yr": val["predicted_2yr"],
-                    "keeper_prob":   val["keeper_prob"],
-                    "key_factors":   val["key_factors"],
-                    "data_year":     val["data_year"],
-                    "missing_data":  val["missing_data"],
+                    "process_value":  val["process_value"],
+                    "predicted_2yr":  val["predicted_2yr"],
+                    "keeper_prob":    val["keeper_prob"],
+                    "key_factors":    val["key_factors"],
+                    "data_year":      val["data_year"],
+                    "missing_data":   val["missing_data"],
+                    "is_rookie_proj": val.get("is_rookie_proj", False),
+                    "low_confidence": val.get("low_confidence", False),
                 })
 
         elif row["asset_type"] == "draft_pick":
@@ -272,14 +282,19 @@ def trade_grades(year: Optional[int] = Query(None)):
 
             asset_info["description"] = desc
 
-            # Process: historical round average
+            # Process: historical round average with keeper discount + future discount
             if ml_available and pick_round:
-                val = valuator.value_pick(pick_round, pick_year or trade_year)
+                val = valuator.value_pick(
+                    pick_round, pick_year or trade_year, trade_year=trade_year
+                )
                 asset_info.update({
-                    "process_value": val["process_value"],
-                    "predicted_2yr": val["round_avg_ppr"],
-                    "key_factors":   val["key_factors"],
-                    "missing_data":  False,
+                    "process_value":  val["process_value"],
+                    "predicted_2yr":  val["round_avg_ppr"],
+                    "keeper_prob":    val["keeper_prob"],
+                    "key_factors":    val["key_factors"],
+                    "missing_data":   False,
+                    "is_rookie_proj": False,
+                    "low_confidence": val.get("low_confidence", False),
                 })
 
         trade_map[tid][receiver]["process_value"] += asset_info["process_value"]
@@ -317,29 +332,38 @@ def trade_grades(year: Optional[int] = Query(None)):
                 outcome_grade = "?"
                 outcome_label = "Pending"
 
+            # Phase 3: flag sides where most assets are uncertain
+            n_assets = len(data["assets"])
+            n_low_conf = sum(1 for a in data["assets"] if a.get("low_confidence"))
+            side_low_conf = n_assets > 0 and (n_low_conf / n_assets) >= 0.5
+
             sides_out.append({
-                "manager":       mgr,
+                "manager":        mgr,
                 # Process
-                "process_value": round(data["process_value"], 1),
-                "process_share": round(p_share, 3),
-                "process_grade": process_grade,
-                "process_label": process_label,
+                "process_value":  round(data["process_value"], 1),
+                "process_share":  round(p_share, 3),
+                "process_grade":  process_grade,
+                "process_label":  process_label,
                 # Outcome
-                "outcome_value": round(data["outcome_value"], 1),
-                "outcome_share": round(o_share, 3),
-                "outcome_grade": outcome_grade,
-                "outcome_label": outcome_label,
+                "outcome_value":  round(data["outcome_value"], 1),
+                "outcome_share":  round(o_share, 3),
+                "outcome_grade":  outcome_grade,
+                "outcome_label":  outcome_label,
+                # Confidence
+                "low_confidence": side_low_conf,
                 # Assets
-                "assets":        data["assets"],
+                "assets":         data["assets"],
             })
 
         # Sort by process value (winner first)
         sides_out.sort(key=lambda s: s["process_value"], reverse=True)
 
+        trade_low_conf = any(s["low_confidence"] for s in sides_out)
         results.append({
             **meta,
-            "ml_graded":     ml_available and total_process > 0,
-            "outcome_graded":total_outcome > 0,
+            "ml_graded":      ml_available and total_process > 0,
+            "outcome_graded": total_outcome > 0,
+            "low_confidence": trade_low_conf,
             "total_process":  round(total_process, 1),
             "total_outcome":  round(total_outcome, 1),
             "sides":          sides_out,

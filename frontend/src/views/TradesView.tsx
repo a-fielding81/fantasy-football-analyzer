@@ -18,8 +18,13 @@ interface KeyFactors {
   coaching_tree?: string;
   round?: number;
   avg_ppr?: number;
+  keep_weight?: number;
+  years_out?: number;
   note?: string;
   data_year?: number;
+  // Phase 1A: rookie projection fields
+  proj_basis?: string;
+  draft_round?: number | null;
 }
 
 interface TradeAsset {
@@ -36,6 +41,8 @@ interface TradeAsset {
   key_factors: KeyFactors;
   data_year: number | null;
   missing_data: boolean;
+  is_rookie_proj: boolean;
+  low_confidence: boolean;
 }
 
 interface TradeSide {
@@ -50,6 +57,7 @@ interface TradeSide {
   outcome_share: number;
   outcome_grade: string;
   outcome_label: string;
+  low_confidence: boolean;
   assets: TradeAsset[];
 }
 
@@ -60,6 +68,7 @@ interface Trade {
   transaction_date: string | null;
   ml_graded: boolean;
   outcome_graded: boolean;
+  low_confidence: boolean;
   total_process: number;
   total_outcome: number;
   sides: TradeSide[];
@@ -149,6 +158,13 @@ function AssetFactors({ asset }: { asset: TradeAsset }) {
       color: "var(--muted)", borderLeft: "2px solid var(--border)",
       display: "flex", flexDirection: "column", gap: 2,
     }}>
+      {/* Rookie projection note */}
+      {asset.is_rookie_proj && (
+        <span style={{ color: "#a78bfa" }}>
+          🔮 Rookie projection via {kf.proj_basis ?? "position baseline"}
+          {kf.draft_round ? ` (Rd${kf.draft_round} ADP)` : ""}
+        </span>
+      )}
       {/* Core stats */}
       {kf.prior_ppr !== undefined && (
         <span>
@@ -172,8 +188,8 @@ function AssetFactors({ asset }: { asset: TradeAsset }) {
             : ""}
         </span>
       )}
-      {/* Pick note */}
-      {kf.note && <span>{kf.note}</span>}
+      {/* Pick note (includes keep-weight + future discount) */}
+      {kf.note && <span style={{ color: asset.low_confidence ? "#f59e0b" : undefined }}>{kf.note}</span>}
       {/* Coaching flags */}
       {flags.length > 0 && <span>{flags.join("  ")}</span>}
     </div>
@@ -364,6 +380,14 @@ function TradeCard({ trade, gradeMode }: { trade: Trade; gradeMode: "process" | 
               ⚡ process ≠ outcome
             </span>
           )}
+          {trade.low_confidence && gradeMode === "process" && (
+            <span style={{
+              fontSize: 11, background: "#78350f22", color: "#f59e0b",
+              borderRadius: 4, padding: "1px 7px", border: "1px solid #78350f44",
+            }}>
+              ⚠ low confidence
+            </span>
+          )}
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {graded && (
@@ -411,7 +435,10 @@ function TradeCard({ trade, gradeMode }: { trade: Trade; gradeMode: "process" | 
                         : <span className="badge badge-pos-default">PICK</span>
                       }
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ fontSize: 13 }}>{a.description}</span>
+                        <span style={{ fontSize: 13 }}>
+                          {a.is_rookie_proj && <span title="Rookie projection — no prior NFL data" style={{ marginRight: 3, opacity: 0.8 }}>🔮</span>}
+                          {a.description}
+                        </span>
                         {expanded && a.keeper_prob !== null && (
                           <div style={{ marginTop: 3 }}>
                             <KeeperBar prob={a.keeper_prob} />
