@@ -50,11 +50,13 @@ interface TradeSide {
   // Process
   process_value: number;
   process_share: number;
+  process_share_pct: number;
   process_grade: string;
   process_label: string;
   // Outcome
   outcome_value: number;
   outcome_share: number;
+  outcome_share_pct: number;
   outcome_grade: string;
   outcome_label: string;
   low_confidence: boolean;
@@ -68,6 +70,9 @@ interface Trade {
   transaction_date: string | null;
   ml_graded: boolean;
   outcome_graded: boolean;
+  outcome_partial: boolean;
+  outcome_seasons_available: number;
+  outcome_window: string;
   low_confidence: boolean;
   total_process: number;
   total_outcome: number;
@@ -98,7 +103,9 @@ const TREE_LABELS: Record<string, string> = {
   other:          "",
 };
 
-function GradeBadge({ grade, label }: { grade: string; label: string }) {
+function GradeBadge({ grade, label, sharePct, partial }: {
+  grade: string; label: string; sharePct?: number; partial?: boolean;
+}) {
   const bg    = GRADE_COLORS[grade] ?? "var(--muted)";
   const color = GRADE_TEXT_DARK[grade] ?? "var(--text)";
   return (
@@ -106,9 +113,18 @@ function GradeBadge({ grade, label }: { grade: string; label: string }) {
       display: "inline-flex", alignItems: "center", gap: 5,
       background: bg, color, borderRadius: 6,
       padding: "2px 10px", fontWeight: 700, fontSize: 13,
-    }}>
+      opacity: partial ? 0.7 : 1,
+    }}
+    title={sharePct !== undefined
+      ? `${sharePct}% of total trade value${partial ? " (partial — not all seasons complete)" : ""}`
+      : undefined}
+    >
       {grade}
-      <span style={{ fontWeight: 400, fontSize: 11, opacity: 0.8 }}>{label}</span>
+      <span style={{ fontWeight: 400, fontSize: 11, opacity: 0.8 }}>
+        {label}
+        {sharePct !== undefined && <> {sharePct}%</>}
+        {partial && <> ⏳</>}
+      </span>
     </span>
   );
 }
@@ -276,11 +292,21 @@ export default function TradesView() {
         ))}
       </div>
 
-      {/* Mode explanation */}
-      <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16, maxWidth: 560 }}>
-        {gradeMode === "process"
-          ? "Process grade: ML-predicted value at time of trade (age, production trends, scheme, keeper probability). A good process grade means you got the better side based on what was knowable."
-          : "Outcome grade: actual fantasy points accumulated post-trade. Captures results but includes luck."}
+      {/* Mode explanation + grade scale */}
+      <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16, maxWidth: 600 }}>
+        <div style={{ marginBottom: 4 }}>
+          {gradeMode === "process"
+            ? "Process grade: ML-predicted value at time of trade (age, production trends, scheme, keeper probability). A good process grade means you got the better side based on what was knowable."
+            : "Outcome grade: actual fantasy points accumulated in the 2 seasons after the trade. Captures results but includes luck. ⏳ = outcome window not yet complete."}
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", opacity: 0.7, marginTop: 4 }}>
+          <span style={{ fontWeight: 600, marginRight: 2 }}>Grade scale (% of total trade value):</span>
+          {[["A+","≥68%"],["A","62-68%"],["B+","57-62%"],["B","52-57%"],["C","≈50%"],["D","42-47%"],["F","35-42%"],["F-","≤35%"]].map(([g,r])=>(
+            <span key={g} style={{ background: GRADE_COLORS[g], color: GRADE_TEXT_DARK[g], borderRadius: 4, padding: "1px 5px", fontSize: 11, fontWeight: 600 }}>
+              {g}<span style={{ fontWeight: 400 }}> {r}</span>
+            </span>
+          ))}
+        </div>
       </div>
 
       {/* Manager summary */}
@@ -358,7 +384,9 @@ function TradeCard({ trade, gradeMode }: { trade: Trade; gradeMode: "process" | 
     ? new Date(Number(trade.transaction_date)).toLocaleDateString()
     : null;
 
-  const graded = gradeMode === "process" ? trade.ml_graded : trade.outcome_graded;
+  const graded = gradeMode === "process" ? trade.ml_graded
+                                         : (trade.outcome_graded || trade.outcome_partial);
+  const isPartialOutcome = gradeMode === "outcome" && trade.outcome_partial && !trade.outcome_graded;
   const totalVal = gradeMode === "process" ? trade.total_process : trade.total_outcome;
 
   // Detect interesting divergences (process grade differs from outcome grade)
@@ -388,6 +416,16 @@ function TradeCard({ trade, gradeMode }: { trade: Trade; gradeMode: "process" | 
               ⚠ low confidence
             </span>
           )}
+          {isPartialOutcome && (
+            <span style={{
+              fontSize: 11, background: "#16537e22", color: "#60a5fa",
+              borderRadius: 4, padding: "1px 7px", border: "1px solid #16537e44",
+            }}
+            title={`Outcome window: ${trade.outcome_window}. Only ${trade.outcome_seasons_available}/2 seasons complete.`}
+            >
+              ⏳ partial outcome ({trade.outcome_seasons_available}/2 seasons)
+            </span>
+          )}
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {graded && (
@@ -411,14 +449,18 @@ function TradeCard({ trade, gradeMode }: { trade: Trade; gradeMode: "process" | 
                 <div className="trade-side-manager">{side.manager}</div>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
                   {graded
-                    ? <GradeBadge grade={grade} label={label} />
+                    ? <GradeBadge
+                        grade={grade} label={label}
+                        sharePct={gradeMode === "process" ? side.process_share_pct : side.outcome_share_pct}
+                        partial={gradeMode === "outcome" && isPartialOutcome}
+                      />
                     : <span style={{ fontSize: 12, color: "var(--muted)" }}>Pending</span>
                   }
                   {/* Show alternate grade hint when expanded */}
-                  {expanded && trade.ml_graded && trade.outcome_graded && (
+                  {expanded && trade.ml_graded && (trade.outcome_graded || trade.outcome_partial) && (
                     <div style={{ fontSize: 10, color: "var(--muted)", display: "flex", gap: 4 }}>
                       {gradeMode === "process"
-                        ? <>Outcome: <GradeBadge grade={side.outcome_grade} label={side.outcome_label} /></>
+                        ? <>Outcome: <GradeBadge grade={side.outcome_grade} label={side.outcome_label} partial={isPartialOutcome} /></>
                         : <>Process: <GradeBadge grade={side.process_grade} label={side.process_label} /></>
                       }
                     </div>
@@ -439,7 +481,7 @@ function TradeCard({ trade, gradeMode }: { trade: Trade; gradeMode: "process" | 
                           {a.is_rookie_proj && <span title="Rookie projection — no prior NFL data" style={{ marginRight: 3, opacity: 0.8 }}>🔮</span>}
                           {a.description}
                         </span>
-                        {expanded && a.keeper_prob !== null && (
+                        {expanded && a.keeper_prob !== null && a.asset_type === "player" && (
                           <div style={{ marginTop: 3 }}>
                             <KeeperBar prob={a.keeper_prob} />
                           </div>

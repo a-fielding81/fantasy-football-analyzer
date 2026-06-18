@@ -99,6 +99,7 @@ _ROOKIE_MEDIAN_FALLBACK = 140.0
 _ROOKIE_KEEPER_PROB = 0.18   # slightly above average for an unproven player
 
 POS_MAP = {"QB": 0, "RB": 1, "WR": 2, "TE": 3}
+SKILL_POSITIONS = {"QB", "RB", "WR", "TE"}   # positions the ML model understands
 
 _MODEL_DIR = Path(__file__).parent
 
@@ -146,6 +147,25 @@ class TradeValuator:
             }
         """
         feats, meta = self._get_player_features(player_id, trade_year, conn)
+
+        # ── Non-skill positions (DEF, K, DST, UNKNOWN) ─────────────────────
+        if meta.get("is_non_skill"):
+            pos_label = meta.get("position") or "non-skill"
+            return {
+                "process_value":  0.0,
+                "predicted_2yr":  0.0,
+                "keeper_prob":    0.0,
+                "keep_weight":    0.0,
+                "key_factors":    {
+                    "position": pos_label,
+                    "note": f"{pos_label} — not ML-gradeable",
+                },
+                "data_year":      None,
+                "missing_data":   True,
+                "is_rookie_proj": False,
+                "low_confidence": True,
+                "is_non_skill":   True,
+            }
 
         # ── Phase 1A: Rookie / no-prior-data path ───────────────────────────
         if feats is None:
@@ -329,11 +349,19 @@ class TradeValuator:
             (player_id,)
         ).fetchone()
 
-        if not player or not player["gsis_id"]:
-            return None, {"is_rookie": True}
+        if not player:
+            return None, {"is_non_skill": True, "position": None}
+
+        pos = player["position"] or ""
+
+        # Non-skill positions (DEF, K, DST, UNKNOWN, etc.) cannot be ML-graded
+        if pos not in SKILL_POSITIONS:
+            return None, {"is_non_skill": True, "position": pos}
+
+        if not player["gsis_id"]:
+            return None, {"position": pos, "is_rookie": True}
 
         gsis = player["gsis_id"]
-        pos  = player["position"] or "WR"
         bd   = player["birth_date"] or ""
 
         # Search in priority order: prior year → two years ago → current year

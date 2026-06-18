@@ -31,8 +31,11 @@ def _grade_label(share: float) -> str:
 # Outcome value helpers  (actual post-trade fantasy points)
 # ---------------------------------------------------------------------------
 
-def _build_player_season_pts(conn) -> dict:
+def _build_player_season_pts(conn) -> tuple[dict, set]:
+    """Returns (pts_map, data_years) where data_years is the set of seasons
+    that actually have weekly stat records."""
     pts = {}
+    data_years: set[int] = set()
     for row in conn.execute("""
         SELECT pws.player_id, s.year, SUM(pws.fantasy_points) AS total
         FROM player_weekly_stats pws
@@ -40,7 +43,8 @@ def _build_player_season_pts(conn) -> dict:
         GROUP BY pws.player_id, s.year
     """):
         pts[(row["player_id"], row["year"])] = row["total"] or 0.0
-    return pts
+        data_years.add(row["year"])
+    return pts, data_years
 
 
 def _player_outcome(player_id: int, from_year: int, pts_map: dict,
@@ -188,7 +192,7 @@ def trade_grades(year: Optional[int] = Query(None)):
     """, params).fetchall()
 
     # Pre-build outcome data
-    pts_map    = _build_player_season_pts(conn)
+    pts_map, data_years = _build_player_season_pts(conn)
     pick_cache = {}
 
     # ── Aggregate by trade → manager ─────────────────────────────────────────
@@ -305,10 +309,17 @@ def trade_grades(year: Optional[int] = Query(None)):
     results = []
     for tid, sides in trade_map.items():
         meta = trade_meta[tid]
-        mgrs = list(sides.keys())
+        trade_year = meta["year"]
 
         total_process = sum(s["process_value"] for s in sides.values())
         total_outcome = sum(s["outcome_value"] for s in sides.values())
+
+        # Outcome completeness: both seasons in the 2-yr window need data
+        outcome_to_year = trade_year + 1
+        outcome_seasons_available = sum(
+            1 for yr in [trade_year, outcome_to_year] if yr in data_years
+        )
+        outcome_complete = outcome_seasons_available == 2
 
         sides_out = []
         for mgr, data in sides.items():
@@ -322,9 +333,14 @@ def trade_grades(year: Optional[int] = Query(None)):
                 process_grade = "?"
                 process_label = "Pending"
 
-            # Outcome grade
-            if total_outcome > 0:
+            # Outcome grade — only assign if window is complete
+            if outcome_complete and total_outcome > 0:
                 o_share = data["outcome_value"] / total_outcome
+                outcome_grade = _grade_share(o_share)
+                outcome_label = _grade_label(o_share)
+            elif not outcome_complete and total_outcome > 0:
+                # We have partial data: compute grade but flag as provisional
+                o_share = data["outcome_value"] / total_outcome if total_outcome > 0 else 0.5
                 outcome_grade = _grade_share(o_share)
                 outcome_label = _grade_label(o_share)
             else:
@@ -342,11 +358,13 @@ def trade_grades(year: Optional[int] = Query(None)):
                 # Process
                 "process_value":  round(data["process_value"], 1),
                 "process_share":  round(p_share, 3),
+                "process_share_pct": round(p_share * 100),
                 "process_grade":  process_grade,
                 "process_label":  process_label,
                 # Outcome
                 "outcome_value":  round(data["outcome_value"], 1),
                 "outcome_share":  round(o_share, 3),
+                "outcome_share_pct": round(o_share * 100),
                 "outcome_grade":  outcome_grade,
                 "outcome_label":  outcome_label,
                 # Confidence
@@ -361,12 +379,16 @@ def trade_grades(year: Optional[int] = Query(None)):
         trade_low_conf = any(s["low_confidence"] for s in sides_out)
         results.append({
             **meta,
-            "ml_graded":      ml_available and total_process > 0,
-            "outcome_graded": total_outcome > 0,
-            "low_confidence": trade_low_conf,
-            "total_process":  round(total_process, 1),
-            "total_outcome":  round(total_outcome, 1),
-            "sides":          sides_out,
+            "ml_graded":               ml_available and total_process > 0,
+            # outcome_graded = True only when both seasons have data
+            "outcome_graded":          outcome_complete and total_outcome > 0,
+            "outcome_partial":         not outcome_complete and total_outcome > 0,
+            "outcome_seasons_available": outcome_seasons_available,
+            "outcome_window":          f"{trade_year}–{outcome_to_year}",
+            "low_confidence":          trade_low_conf,
+            "total_process":           round(total_process, 1),
+            "total_outcome":           round(total_outcome, 1),
+            "sides":                   sides_out,
         })
 
     conn.close()
