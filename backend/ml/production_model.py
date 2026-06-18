@@ -83,6 +83,16 @@ def build_dataset(conn) -> pd.DataFrame:
             a.wopr                                             AS wopr_t,
             a.rushing_epa                                      AS rushing_epa_t,
             a.receiving_epa                                    AS receiving_epa_t,
+            a.team_pass_rate                                   AS team_pass_rate_t,
+            a.team_pass_rate_change                            AS team_pass_rate_change_t,
+            -- Personnel / scheme features (2016+ from participation data)
+            a.team_11_rate                                     AS team_11_rate_t,
+            a.team_shotgun_rate                                AS team_shotgun_rate_t,
+            -- Coaching features
+            a.team_hc_tenure                                   AS team_hc_tenure_t,
+            a.team_new_oc                                      AS team_new_oc_t,
+            a.team_hc_midseason_change                         AS team_hc_midseason_t,
+            a.coaching_tree                                    AS coaching_tree_t,
             a.birth_date,
             -- prior year stats (self-join via subquery replaced by window)
             LAG(a.fantasy_points_ppr, 1)
@@ -120,10 +130,20 @@ def build_dataset(conn) -> pd.DataFrame:
     # Encode position
     df["pos_enc"] = df["position"].map(POS_MAP).fillna(0).astype(int)
 
-    # Fill remaining NAs
+    # Encode coaching tree as binary flags
+    df["is_shanahan_mcvay"] = (df["coaching_tree_t"] == "shanahan_mcvay").astype(int)
+    df["is_belichick"]      = (df["coaching_tree_t"] == "belichick").astype(int)
+    df["is_reid_wco"]       = (df["coaching_tree_t"] == "reid_wco").astype(int)
+
+    # Fill remaining NAs — 0 is appropriate:
+    #   team_11_rate: 0 signals "pre-2016 / unknown" (model learns this)
+    #   coaching flags: 0 = not in that tree
     fill_cols = [
         "pts_t_minus1", "carries_t", "targets_t", "target_share_t",
         "air_yards_share_t", "wopr_t", "rushing_epa_t", "receiving_epa_t",
+        "team_pass_rate_t", "team_pass_rate_change_t",
+        "team_11_rate_t", "team_shotgun_rate_t",
+        "team_hc_tenure_t", "team_new_oc_t", "team_hc_midseason_t",
     ]
     df[fill_cols] = df[fill_cols].fillna(0)
     df = df[df["age"].between(18, 45)].copy()
@@ -132,12 +152,21 @@ def build_dataset(conn) -> pd.DataFrame:
 
 
 FEATURE_COLS = [
+    # Player production
     "pos_enc", "age",
     "pts_t", "pts_t_minus1", "pts_trend",
     "games_t", "games_t_minus1", "games_trend",
     "carries_t", "targets_t",
     "target_share_t", "air_yards_share_t", "wopr_t",
     "rushing_epa_t", "receiving_epa_t",
+    # Team scheme — pass rate (1999+)
+    "team_pass_rate_t", "team_pass_rate_change_t",
+    # Team scheme — personnel grouping (2016+, 0 for earlier)
+    "team_11_rate_t", "team_shotgun_rate_t",
+    # Coaching stability / disruption
+    "team_hc_tenure_t", "team_new_oc_t", "team_hc_midseason_t",
+    # Coaching tree lineage (binary flags)
+    "is_shanahan_mcvay", "is_belichick", "is_reid_wco",
 ]
 
 

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Trophy, ArrowLeftRight, ClipboardList, Search, BarChart2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Trophy, ArrowLeftRight, ClipboardList, Search, BarChart2, Sun, Moon } from "lucide-react";
 import StandingsView from "./views/StandingsView";
 import TradesView from "./views/TradesView";
 import DraftView from "./views/DraftView";
@@ -19,6 +19,16 @@ const TABS: { id: Tab; label: string; Icon: React.FC<{ size?: number }> }[] = [
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("standings");
+  const [dark, setDark] = useState<boolean>(() => {
+    const saved = localStorage.getItem("theme");
+    if (saved) return saved === "dark";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+    localStorage.setItem("theme", dark ? "dark" : "light");
+  }, [dark]);
 
   return (
     <div className="app">
@@ -40,6 +50,14 @@ export default function App() {
               </button>
             ))}
           </nav>
+          <button
+            className="theme-toggle"
+            onClick={() => setDark((d) => !d)}
+            aria-label="Toggle theme"
+            title={dark ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            {dark ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
         </div>
       </header>
 

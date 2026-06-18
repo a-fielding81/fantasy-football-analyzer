@@ -60,13 +60,10 @@ export default function DraftView() {
         </div>
 
         <input
+          className="filter-input"
           placeholder="Filter by manager…"
           value={managerFilter}
           onChange={(e) => setManagerFilter(e.target.value)}
-          style={{
-            background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 6,
-            padding: "5px 12px", color: "var(--text)", fontSize: 13, outline: "none",
-          }}
         />
       </div>
 

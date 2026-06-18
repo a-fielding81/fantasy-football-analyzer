@@ -4,10 +4,6 @@ import { api } from "../api";
 
 type SortKey = "final_rank" | "wins" | "points_for" | "points_against" | "point_diff";
 
-function posBadge(pos: string) {
-  const cls = `badge badge-pos-${pos}` in document.styleSheets ? `badge badge-pos-${pos}` : "badge badge-pos-default";
-  return <span className={`badge badge-pos-${["QB","RB","WR","TE","K","DEF"].includes(pos) ? pos : "default"}`}>{pos}</span>;
-}
 
 export default function StandingsView() {
   const { data: seasons, isLoading: loadingSeasons } = useQuery({
