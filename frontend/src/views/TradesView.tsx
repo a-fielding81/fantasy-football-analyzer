@@ -37,12 +37,14 @@ interface TradeAsset {
   // Process
   process_value: number;
   predicted_2yr: number;
+  keep_weight: number | null;
   keeper_prob: number | null;
   key_factors: KeyFactors;
   data_year: number | null;
   missing_data: boolean;
   is_rookie_proj: boolean;
   low_confidence: boolean;
+  stale_data: boolean;
 }
 
 interface TradeSide {
@@ -429,8 +431,11 @@ function TradeCard({ trade, gradeMode }: { trade: Trade; gradeMode: "process" | 
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {graded && (
-            <span style={{ fontSize: 12, color: "var(--muted)" }}>
-              {totalVal.toFixed(0)} {gradeMode === "process" ? "pred pts" : "actual pts"}
+            <span style={{ fontSize: 12, color: "var(--muted)" }}
+              title={gradeMode === "process"
+                ? "Sum of each side's ML process value (keeper-weighted 2yr PPR prediction)"
+                : "Sum of actual fantasy points accumulated post-trade (2-season window)"}>
+              {totalVal.toFixed(0)} {gradeMode === "process" ? "process value" : "actual pts"}
             </span>
           )}
           <span style={{ fontSize: 12, color: "var(--muted)" }}>{expanded ? "▲" : "▼"}</span>
@@ -491,13 +496,42 @@ function TradeCard({ trade, gradeMode }: { trade: Trade; gradeMode: "process" | 
                         <div style={{ textAlign: "right", fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap", paddingLeft: 8 }}>
                           {gradeMode === "process" ? (
                             <>
-                              <div style={{ color: "var(--text)", fontWeight: 600 }}>{a.process_value > 0 ? `${a.process_value.toFixed(0)} pred` : "—"}</div>
-                              <div>{a.outcome_points > 0 ? `${a.outcome_points.toFixed(0)} actual` : "no data"}</div>
+                              {a.process_value > 0 ? (
+                                <>
+                                  {/* Raw 2yr prediction (what the model actually predicts) */}
+                                  <div style={{ color: "var(--text)", fontWeight: 600 }}>
+                                    {a.predicted_2yr.toFixed(0)} 2yr pred
+                                  </div>
+                                  {/* Per-season average for context */}
+                                  <div style={{ fontSize: 11 }}>
+                                    ~{(a.predicted_2yr / 2).toFixed(0)}/yr avg
+                                  </div>
+                                  {/* Process value = predicted_2yr × keep_weight */}
+                                  {a.keep_weight !== null && a.keep_weight !== 1.0 && (
+                                    <div style={{ fontSize: 11 }}>
+                                      × {((a.keep_weight ?? 0) * 100).toFixed(0)}% keep-wt = {a.process_value.toFixed(0)}
+                                    </div>
+                                  )}
+                                  {/* Stale data warning */}
+                                  {a.stale_data && a.data_year && (
+                                    <div style={{ color: "#f59e0b", fontSize: 10 }}>
+                                      ⚠ using {a.data_year} stats
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <div>—</div>
+                              )}
+                              <div style={{ marginTop: 2 }}>
+                                {a.outcome_points > 0 ? `${a.outcome_points.toFixed(0)} actual` : "no data"}
+                              </div>
                             </>
                           ) : (
                             <>
                               <div style={{ color: "var(--text)", fontWeight: 600 }}>{a.outcome_points > 0 ? `${a.outcome_points.toFixed(0)} pts` : "—"}</div>
-                              <div>{a.process_value > 0 ? `${a.process_value.toFixed(0)} pred` : ""}</div>
+                              {a.process_value > 0 && (
+                                <div style={{ fontSize: 11 }}>{a.predicted_2yr.toFixed(0)} 2yr pred</div>
+                              )}
                             </>
                           )}
                         </div>

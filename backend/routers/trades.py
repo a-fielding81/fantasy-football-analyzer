@@ -253,17 +253,28 @@ def trade_grades(year: Optional[int] = Query(None)):
             # Process (ML)
             if ml_available:
                 tkb = _times_kept_before(pid, recv_mgr_id, trade_year, conn)
+                # The receiving manager just chose to acquire this player — that
+                # is itself a signal of intent to keep. Treat newly acquired
+                # players as if kept at least once to avoid penalising managers
+                # for not having a prior history with a player they just traded for.
+                tkb_adj = max(tkb, 1)
                 val = valuator.value_player(pid, trade_year, conn,
-                                            times_kept_before=tkb)
+                                            times_kept_before=tkb_adj)
                 asset_info.update({
                     "process_value":  val["process_value"],
                     "predicted_2yr":  val["predicted_2yr"],
+                    "keep_weight":    val["keep_weight"],
                     "keeper_prob":    val["keeper_prob"],
                     "key_factors":    val["key_factors"],
                     "data_year":      val["data_year"],
                     "missing_data":   val["missing_data"],
                     "is_rookie_proj": val.get("is_rookie_proj", False),
                     "low_confidence": val.get("low_confidence", False),
+                    # Flag stale data (using stats more than 1 season before trade)
+                    "stale_data": (
+                        val["data_year"] is not None and
+                        val["data_year"] < trade_year - 1
+                    ),
                 })
 
         elif row["asset_type"] == "draft_pick":
@@ -294,11 +305,13 @@ def trade_grades(year: Optional[int] = Query(None)):
                 asset_info.update({
                     "process_value":  val["process_value"],
                     "predicted_2yr":  val["round_avg_ppr"],
+                    "keep_weight":    val["keep_weight"],
                     "keeper_prob":    val["keeper_prob"],
                     "key_factors":    val["key_factors"],
                     "missing_data":   False,
                     "is_rookie_proj": False,
                     "low_confidence": val.get("low_confidence", False),
+                    "stale_data":     False,
                 })
 
         trade_map[tid][receiver]["process_value"] += asset_info["process_value"]
